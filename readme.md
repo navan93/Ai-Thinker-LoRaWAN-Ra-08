@@ -1,61 +1,61 @@
-# 安信可LoRaWAN模组Ra-08(H)二次开发入门指南
-# 目录
+# Anxinke LoRaWAN module Ra-08(H) secondary development guide
+# Table of contents
 
-# <span id = "Introduction">0.介绍</span>
-[安信可](https://www.espressif.com/zh-hans)是物联网无线的设计专家，专注于设计简单灵活、易于制造和部署的解决方案。安信可研发和设计 IoT 业内集成度SoC、性能稳定、功耗低的无线系统级模组产品，有 Wi-Fi 、LoRaWAN、蓝牙、UWB 功能的各类模组，模组具备出色的射频性能。
+# <span id = "Introduction">0. Introduction</span>
+[Espressif](https://www.espressif.com/zh-hans) is an expert in IoT wireless design, focusing on solutions that are simple, flexible, easy to manufacture and deploy. Anxin can develop and design IoT industry-integrated SoC, wireless system-level module products with stable performance and low power consumption, and various modules with Wi-Fi, LoRaWAN, Bluetooth, and UWB functions. The modules have excellent radio frequency performance.
 
-Ra-08(H) 模组是安信可科技与上海翱捷科技（**简称ASR**）深度合作、共同研发的一款 LoRaWAN 模组，本仓库是对应此LoRaWAN模组 SoC 二次开发入门指南，模组对应的芯片型号为**ASR6601CB、 Flash 128 KB 、SRAM  16 KB、内核 32-bit 48 MHz ARM Cortex-M4**。
+The Ra-08(H) module is a LoRaWAN module jointly developed by Anxinke Technology and Shanghai ASR Technology (**referred to as ASR**) in depth cooperation. This warehouse is the introduction to the secondary development of SoC corresponding to this LoRaWAN module. Guide, the chip model corresponding to the module is **ASR6601CB, Flash 128 KB, SRAM 16 KB, core 32-bit 48 MHz ARM Cortex-M4**.
 
-Ra-08(H) 模组出厂内置 AT 固件程序，直接上手使用对接LoRaWAN网关。如需对接 阿里LinkWAN 需编程本仓库代码。
+The Ra-08(H) module has a built-in AT firmware program before leaving the factory, and it can be used directly to connect to the LoRaWAN gateway. If you need to connect to Ali LinkWAN, you need to program this warehouse code.
 
-# <span id = "aim">1.目的</span>
-本文基于 linux 环境，介绍安信可 Ra-08(H) 模组二次开发点对点通讯的具体流程，供读者参考。
+# <span id = "aim">1. Purpose</span>
+Based on the linux environment, this article introduces the specific process of secondary development of point-to-point communication of Anxinke Ra-08(H) module, for readers' reference.
 
-# <span id = "hardwareprepare">2.硬件准备</span>
-- **linux 环境**  
-用来编译 & 烧写 & 运行等操作的必须环境，本文以 （Ubuntu18.04） 为例。 
-> windows 用户可安装虚拟机，在虚拟机中安装 linux。
+# <span id = "hardwareprepare">2. Hardware preparation</span>
+- **linux environment**
+The necessary environment for compiling & programming & running operations, this article takes (Ubuntu18.04) as an example.
+> Windows users can install a virtual machine and install linux in the virtual machine.
 
-- **设备**  
-前往安信可官方获取 2 PCS：[样品](https://anxinke.taobao.com) ，带小辣椒天线。
+- **equipment**  
+Go to Anxinke official website to get 2 PCS: [sample](https://anxinke.taobao.com), with small pepper antenna.
 
-- **USB 线**  
-连接 PC 和 Ra-08 开发板，用来烧写/下载程序，查看 log 等。
+- **USB cable**
+Connect PC and Ra-08 development board to burn/download programs, view logs, etc.
 
-# <span id = "aliyunprepare">3.Ra-08开发板准备</span>
+# <span id = "aliyunprepare">3. Ra-08 development board preparation</span>
 
-| 安信可在售模组                           | 是否支持            |
-| ---------------------------------------- | ------------------- |
-| Ra-08 | 支持 |
-| Ra-08H   | 支持                |
-# <span id = "compileprepare">4.编译器环境搭建</span>
+| Anxin can sell modules | Whether to support |
+| -----------------------| ------------------ |
+| Ra-08 | Support |
+| Ra-08H | Support |
+# <span id = "compileprepare">4. Build the compiler environment</span>
 ```
-sudo apt-get install gcc-arm-none-eabi git vim python python-pip pip install pyserial configparser 
+sudo apt-get install gcc-arm-none-eabi git vim python python-pip pip install pyserial configparser
 ```
 
-# <span id = "sdkprepare">5.SDK 准备</span> 
+# <span id = "sdkprepare">5. SDK preparation</span>
 
 ```
 git clone --recursive https://github.com/Ai-Thinker-Open/Ai-Thinker-LoRaWAN-Ra-08.git
 ```
 
 
-# <span id = "makeflash">6.编译 & 烧写 & 运行</span>
-## 6.1 编译
+# <span id = "makeflash">6. Compile & Burn & Run</span>
+## 6.1 Compile
 
-### 6.1.1 配置环境变量
+### 6.1.1 Configure environment variables
 
  ```
  source build/envsetup.sh
  ```
 
-### 6.1.2 编译点对点通讯的示例
+### 6.1.2 Example of compiling peer-to-peer communication
 ```
 cd projects/ASR6601CB-EVAL/examples/lora/pingpong/
 make
 ```
 
-编译成功后，出现这样的LOG
+After the compilation is successful, such a LOG appears
 
 ```
 "arm-none-eabi-size" out/pingpong.elf
@@ -65,22 +65,21 @@ Please run 'make flash' or the following command to download the app
 python /mnt/d/GitHub/ASR6601_AT_LoRaWAN/build/scripts/tremo_loader.py -p /dev/ttyUSB0 -b 921600 flash 0x08000000 out/pingpong.bin
 ```
 
-找到烧写串口，然后开始烧录，比如我的接入串口是 /dev/ttyUSB2 ：
+Find the burning serial port, and then start burning, for example, my access serial port is /dev/ttyUSB2:
 
 ```
 python /mnt/d/GitHub/ASR6601_AT_LoRaWAN/build/scripts/tremo_loader.py -p /dev/ttyUSB2 -b 921600 flash 0x08000000 out/pingpong.bin
 ```
 
-## 6.2 清空工程编译文件 & 编译烧写 & 下载固件 & 查看 log
-将 USB 线连接好设备和 PC，确保烧写端口正确，并且按照下面操作把模块进去下载模式。
-
+## 6.2 Clear the project compilation file & compile and burn & download firmware & view log
+Connect the USB cable to the device and PC, make sure the programming port is correct, and follow the steps below to put the module into the download mode.
 
 <p align="center">
   <img src="png\connect.png" width="480px" height="370px" alt="Banner" />
 </p>
 
 
-先修改默认的连接硬件的端口号、波特率，在文件 ```\build\make\common.mk``` 里面修改：
+First modify the default port number and baud rate of the connected hardware, and modify it in the file ```\build\make\common.mk```:
 
 ```
 # flash settings
@@ -89,21 +88,21 @@ SERIAL_PORT        ?= /dev/ttyUSB0
 SERIAL_BAUDRATE    ?= 921600
 ```
 
-### 6.2.1 清空工程编译文件
+### 6.2.1 Clear project compilation file
 
 ```
 make clean
 ```
-> 注：无需每次擦除，如修改配置文件重新编译，需执行此操作。
+> Note: It is not necessary to erase each time, such as modifying the configuration file and recompiling, this operation is required.
 
-### 6.2.2 烧录程序
+### 6.2.2 Burning program
 ```
 make flash
 ```
 
-### 6.2.3 运行
+### 6.2.3 Running
 
-2个 Ra-08-Kit 开发板按下 RST 按键，即可看到如下 log：
+Press the RST button on two Ra-08-Kit development boards, and you can see the following log:
 
 ```
 Received: PING
