@@ -75,7 +75,7 @@ python /mnt/d/GitHub/ASR6601_AT_LoRaWAN/build/scripts/tremo_loader.py -p /dev/tt
 Connect the USB cable to the device and PC, make sure the programming port is correct, and follow the steps below to put the module into the download mode.
 
 <p align="center">
-  <img src="png\connect.png" width="480px" height="370px" alt="Banner" />
+  <img src="png\connect.translated.jpg" width="480px" height="370px" alt="Banner" />
 </p>
 
 
