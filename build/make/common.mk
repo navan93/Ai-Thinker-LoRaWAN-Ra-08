@@ -4,7 +4,7 @@ export MAKEFILES_PATH ?= $(TREMO_SDK_PATH)/build/make
 export SCRIPTS_PATH ?= $(TREMO_SDK_PATH)/build/scripts
 export OUT_DIR ?= out
 export VIEW
-export PYTHON = python
+export PYTHON = python3
 export HOST_ARCH := Cortex-M4F
 
 ifeq ($(shell uname), Linux)
@@ -81,7 +81,7 @@ all: $(OUT_DIR)/$(PROJECT)$(BIN_OUTPUT_SUFFIX)
 	$(SIZE) $(OUT_DIR)/$(PROJECT)$(LINK_OUTPUT_SUFFIX)
 	$(VIEW)echo "Please run 'make flash' or the following command to download the app"
 	@echo $(PYTHON) $(TREMO_LOADER) -p $(SERIAL_PORT) -b $(SERIAL_BAUDRATE) flash $($(PROJECT)_ADDRESS) $(OUT_DIR)/$(PROJECT)$(BIN_OUTPUT_SUFFIX)
-endif    
+endif
 
 $(OUT_DIR)/$(PROJECT)$(BIN_OUTPUT_SUFFIX): $(OUT_DIR)/$(PROJECT)$(LINK_OUTPUT_SUFFIX)
 	$(VIEW)echo $@
@@ -95,7 +95,7 @@ $(OUT_DIR)/$(PROJECT)$(LINK_OUTPUT_SUFFIX): $(addprefix $(OUT_DIR)/,$(notdir $($
 flash: $(OUT_DIR)/$(PROJECT)$(BIN_OUTPUT_SUFFIX) $(TREMO_LOADER)
 	$(VIEW)echo Start flashing...
 	$(VIEW)$(PYTHON) $(TREMO_LOADER) -p $(SERIAL_PORT) -b $(SERIAL_BAUDRATE) flash $($(PROJECT)_ADDRESS) $(OUT_DIR)/$(PROJECT)$(BIN_OUTPUT_SUFFIX)
-	
+
 clean:
 	$(VIEW)echo Cleaning...
 	$(VIEW)rm -rf $(OUT_DIR)
