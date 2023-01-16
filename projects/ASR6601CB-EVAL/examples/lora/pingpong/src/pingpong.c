@@ -27,6 +27,7 @@
 #include "timer.h"
 #include "radio.h"
 #include "tremo_system.h"
+#include "tremo_pwr.h"
 
 #if defined( REGION_AS923 )
 
@@ -80,12 +81,12 @@
                                                               //  1: 250 kHz,
                                                               //  2: 500 kHz,
                                                               //  3: Reserved]
-#define LORA_SPREADING_FACTOR                       7         // [SF7..SF12]
+#define LORA_SPREADING_FACTOR                       10         // [SF7..SF12]
 #define LORA_CODINGRATE                             1         // [1: 4/5,
                                                               //  2: 4/6,
                                                               //  3: 4/7,
                                                               //  4: 4/8]
-#define LORA_PREAMBLE_LENGTH                        8         // Same for Tx and Rx
+#define LORA_PREAMBLE_LENGTH                        12        // Same for Tx and Rx
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
@@ -115,6 +116,7 @@ typedef enum
 
 #define RX_TIMEOUT_VALUE                            1800
 #define BUFFER_SIZE                                 5 // Define the payload size here
+#define SLEEP_TIMEOUT_VALUE                         7000
 
 const uint8_t PingMsg[] = "PING";
 const uint8_t PongMsg[] = "PONG";
@@ -122,12 +124,14 @@ const uint8_t PongMsg[] = "PONG";
 uint16_t BufferSize = BUFFER_SIZE;
 uint8_t Buffer[BUFFER_SIZE];
 
-volatile States_t State = LOWPOWER;
+volatile States_t State = TX;
 
 int8_t RssiValue = 0;
 int8_t SnrValue = 0;
 
 uint32_t ChipId[2] = {0};
+
+TimerEvent_t SleepTimeoutTimer;
 
 /*!
  * Radio events function pointer
@@ -159,6 +163,11 @@ void OnRxTimeout( void );
  */
 void OnRxError( void );
 
+/*!
+ * \brief Function executed on Sleep timeout event
+ */
+void SleepTimeoutIrq( void );
+
 /**
  * Main application entry point.
  */
@@ -188,7 +197,7 @@ int app_start( void )
     Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH,
                                    LORA_SPREADING_FACTOR, LORA_CODINGRATE,
                                    LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
-                                   true, 0, 0, LORA_IQ_INVERSION_ON, 3000 );
+                                   true, 0, 0, LORA_IQ_INVERSION_ON, 1000 );
 
     Radio.SetRxConfig( MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
                                    LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
@@ -211,7 +220,9 @@ int app_start( void )
     #error "Please define a frequency band in the compiler options."
 #endif
 
-    Radio.Rx( RX_TIMEOUT_VALUE );
+    TimerInit( &SleepTimeoutTimer, SleepTimeoutIrq );
+
+    // Radio.Rx( RX_TIMEOUT_VALUE );
 
     while( 1 )
     {
@@ -284,7 +295,23 @@ int app_start( void )
             State = LOWPOWER;
             break;
         case TX:
-            Radio.Rx( RX_TIMEOUT_VALUE );
+            // Radio.Rx( RX_TIMEOUT_VALUE );
+            {
+                // Send the next PING frame
+                Buffer[0] = 'P';
+                Buffer[1] = 'I';
+                Buffer[2] = 'N';
+                Buffer[3] = 'G';
+                for( i = 4; i < BufferSize; i++ )
+                {
+                    Buffer[i] = i - 4;
+                }
+                // srand( *ChipId );
+                // random = ( rand() + 1 ) % 90;
+                // DelayMs( random );
+                Radio.Send( Buffer, BufferSize );
+                printf("Sent: PING\r\n");
+            }
             State = LOWPOWER;
             break;
         case RX_TIMEOUT:
@@ -314,11 +341,28 @@ int app_start( void )
             break;
         case TX_TIMEOUT:
             Radio.Rx( RX_TIMEOUT_VALUE );
+            // {
+            //     // Send the next PING frame
+            //     Buffer[0] = 'P';
+            //     Buffer[1] = 'I';
+            //     Buffer[2] = 'N';
+            //     Buffer[3] = 'G';
+            //     for( i = 4; i < BufferSize; i++ )
+            //     {
+            //         Buffer[i] = i - 4;
+            //     }
+            //     // srand( *ChipId );
+            //     // random = ( rand() + 1 ) % 90;
+            //     // DelayMs( random );
+            //     Radio.Send( Buffer, BufferSize );
+            //     printf("Sent: PING\r\n");
+            // }
             State = LOWPOWER;
             break;
         case LOWPOWER:
         default:
             // Set low power
+            TimerLowPowerHandler( );
             break;
         }
 
@@ -329,12 +373,16 @@ int app_start( void )
 
 void OnTxDone( void )
 {
+    printf("OnTxDone\r\n");
     Radio.Sleep( );
-    State = TX;
+    TimerSetValue(&SleepTimeoutTimer, SLEEP_TIMEOUT_VALUE);
+    TimerStart(&SleepTimeoutTimer);
+    State = LOWPOWER;
 }
 
 void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 {
+    printf("OnRxDone\r\n");
     Radio.Sleep( );
     BufferSize = size;
     memcpy( Buffer, payload, BufferSize );
@@ -345,6 +393,7 @@ void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
 
 void OnTxTimeout( void )
 {
+    printf("OnTxTimeout\r\n");
     Radio.Sleep( );
     State = TX_TIMEOUT;
 }
@@ -360,4 +409,12 @@ void OnRxError( void )
 {
     Radio.Sleep( );
     State = RX_ERROR;
+}
+
+void SleepTimeoutIrq( void )
+{
+    printf("SleepTimeoutIrq\r\n");
+    TimerStop(&SleepTimeoutTimer);
+    State = TX;
+    pwr_exit_lprun_mode();
 }
