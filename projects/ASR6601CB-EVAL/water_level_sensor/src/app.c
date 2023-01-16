@@ -26,6 +26,8 @@
 #include "radio.h"
 #include "tremo_system.h"
 #include "tremo_pwr.h"
+#include "tremo_gpio.h"
+#include "lora_config.h"
 
 #define RF_FREQUENCY                                865000000 // Hz
 #define TX_OUTPUT_POWER                             14        // dBm
@@ -46,31 +48,30 @@
 typedef enum
 {
     LOWPOWER,
-    RX,
-    RX_TIMEOUT,
-    RX_ERROR,
+    MEASURE_WATER_LEVEL,
     TX,
     TX_TIMEOUT
 }States_t;
 
-#define RX_TIMEOUT_VALUE                            1800
-#define BUFFER_SIZE                                 5 // Define the payload size here
+typedef union {
+    struct message_fields{
+        uint16_t device_id;
+        uint16_t fw_ver;
+        uint16_t hw_ver;
+        uint8_t  water_level_percentage;
+        uint8_t  sensor_value_raw;
+        uint16_t battery_voltage_mv;
+        uint8_t  error_status;
+    }fields;
+    uint8_t buffer[11];
+}tx_message_t;
+
+#define BUFFER_SIZE                                 sizeof(tx_message_t) // Define the payload size here
 #define SLEEP_TIMEOUT_VALUE                         7000
 
-const uint8_t PingMsg[] = "PING";
-const uint8_t PongMsg[] = "PONG";
-
-uint16_t BufferSize = BUFFER_SIZE;
-uint8_t Buffer[BUFFER_SIZE];
-
-volatile States_t State = TX;
-
-int8_t RssiValue = 0;
-int8_t SnrValue = 0;
-
-uint32_t ChipId[2] = {0};
-
-TimerEvent_t SleepTimeoutTimer;
+static volatile States_t State = TX;
+static uint32_t ChipId[2] = {0};
+static TimerEvent_t SleepTimeoutTimer;
 
 /*!
  * Radio events function pointer
@@ -83,29 +84,17 @@ static RadioEvents_t RadioEvents;
 void OnTxDone( void );
 
 /*!
- * \brief Function to be executed on Radio Rx Done event
- */
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
-
-/*!
  * \brief Function executed on Radio Tx Timeout event
  */
 void OnTxTimeout( void );
 
 /*!
- * \brief Function executed on Radio Rx Timeout event
- */
-void OnRxTimeout( void );
-
-/*!
- * \brief Function executed on Radio Rx Error event
- */
-void OnRxError( void );
-
-/*!
  * \brief Function executed on Sleep timeout event
  */
 void SleepTimeoutIrq( void );
+
+uint16_t get_sensor_value(void);
+uint8_t measure_water_level(void);
 
 /**
  * Main application entry point.
@@ -115,17 +104,25 @@ int app_start( void )
     bool isMaster = true;
     uint8_t i;
     uint32_t random;
+    tx_message_t tx_message = {
+        .fields.device_id              = 1,
+        .fields.fw_ver                 = 0x0005, // v0.5
+        .fields.hw_ver                 = 0x0100, // v1.0
+        .fields.battery_voltage_mv     = 3600,
+        .fields.water_level_percentage = 0,
+        .fields.sensor_value_raw       = 0
+    };
 
     printf("PingPong test Start!\r\n");
 
     (void)system_get_chip_id(ChipId);
 
     // Radio initialization
-    RadioEvents.TxDone = OnTxDone;
-    RadioEvents.RxDone = OnRxDone;
+    RadioEvents.TxDone    = OnTxDone;
     RadioEvents.TxTimeout = OnTxTimeout;
-    RadioEvents.RxTimeout = OnRxTimeout;
-    RadioEvents.RxError = OnRxError;
+    RadioEvents.RxDone    = NULL;
+    RadioEvents.RxTimeout = NULL;
+    RadioEvents.RxError   = NULL;
 
     Radio.Init( &RadioEvents );
 
@@ -147,146 +144,33 @@ int app_start( void )
     {
         switch( State )
         {
-        case RX:
-            if( isMaster == true )
-            {
-                if( BufferSize > 0 )
-                {
-                    if( strncmp( ( const char* )Buffer, ( const char* )PongMsg, 4 ) == 0 )
-                    {
-                        printf("Received: PONG\r\n");
-
-                        // Send the next PING frame
-                        Buffer[0] = 'P';
-                        Buffer[1] = 'I';
-                        Buffer[2] = 'N';
-                        Buffer[3] = 'G';
-                        // We fill the buffer with numbers for the payload
-                        for( i = 4; i < BufferSize; i++ )
-                        {
-                            Buffer[i] = i - 4;
-                        }
-                        DelayMs( 10 );
-                        printf("Sent: PING\r\n");
-                        Radio.Send( Buffer, BufferSize );
-                    }
-                    else if( strncmp( ( const char* )Buffer, ( const char* )PingMsg, 4 ) == 0 )
-                    { // A master already exists then become a slave
-                        isMaster = false;
-                        Radio.Rx( RX_TIMEOUT_VALUE );
-                    }
-                    else // valid reception but neither a PING or a PONG message
-                    {    // Set device as master ans start again
-                        isMaster = true;
-                        Radio.Rx( RX_TIMEOUT_VALUE );
-                    }
-                }
-            }
-            else
-            {
-                if( BufferSize > 0 )
-                {
-                    if( strncmp( ( const char* )Buffer, ( const char* )PingMsg, 4 ) == 0 )
-                    {
-                        printf("Received: PING\r\n");
-
-                        // Send the reply to the PONG string
-                        Buffer[0] = 'P';
-                        Buffer[1] = 'O';
-                        Buffer[2] = 'N';
-                        Buffer[3] = 'G';
-                        // We fill the buffer with numbers for the payload
-                        for( i = 4; i < BufferSize; i++ )
-                        {
-                            Buffer[i] = i - 4;
-                        }
-                        DelayMs( 10 );
-                        Radio.Send( Buffer, BufferSize );
-                        printf("Sent: PONG\r\n");
-                    }
-                    else // valid reception but not a PING as expected
-                    {    // Set device as master and start again
-                        isMaster = true;
-                        Radio.Rx( RX_TIMEOUT_VALUE );
-                    }
-                }
-            }
-            State = LOWPOWER;
-            break;
         case TX:
-            // Radio.Rx( RX_TIMEOUT_VALUE );
-            {
-                // Send the next PING frame
-                Buffer[0] = 'P';
-                Buffer[1] = 'I';
-                Buffer[2] = 'N';
-                Buffer[3] = 'G';
-                for( i = 4; i < BufferSize; i++ )
-                {
-                    Buffer[i] = i - 4;
-                }
-                // srand( *ChipId );
-                // random = ( rand() + 1 ) % 90;
-                // DelayMs( random );
-                Radio.Send( Buffer, BufferSize );
-                printf("Sent: PING\r\n");
-            }
-            State = LOWPOWER;
-            break;
-        case RX_TIMEOUT:
-        case RX_ERROR:
-            if( isMaster == true )
-            {
-                // Send the next PING frame
-                Buffer[0] = 'P';
-                Buffer[1] = 'I';
-                Buffer[2] = 'N';
-                Buffer[3] = 'G';
-                for( i = 4; i < BufferSize; i++ )
-                {
-                    Buffer[i] = i - 4;
-                }
-                srand( *ChipId );
-                random = ( rand() + 1 ) % 90;
-                DelayMs( random );
-                Radio.Send( Buffer, BufferSize );
-                printf("Sent: PING\r\n");
-            }
-            else
-            {
-                Radio.Rx( RX_TIMEOUT_VALUE );
-            }
+            // Send the next PING frame
+            // srand( *ChipId );
+            // random = ( rand() + 1 ) % 90;
+            // DelayMs( random );
+            Radio.Send(tx_message.buffer, sizeof(tx_message_t));
+            printf("Sent: Tx Message\r\n");
             State = LOWPOWER;
             break;
         case TX_TIMEOUT:
-            Radio.Rx( RX_TIMEOUT_VALUE );
-            // {
-            //     // Send the next PING frame
-            //     Buffer[0] = 'P';
-            //     Buffer[1] = 'I';
-            //     Buffer[2] = 'N';
-            //     Buffer[3] = 'G';
-            //     for( i = 4; i < BufferSize; i++ )
-            //     {
-            //         Buffer[i] = i - 4;
-            //     }
-            //     // srand( *ChipId );
-            //     // random = ( rand() + 1 ) % 90;
-            //     // DelayMs( random );
-            //     Radio.Send( Buffer, BufferSize );
-            //     printf("Sent: PING\r\n");
-            // }
             State = LOWPOWER;
+            break;
+        case MEASURE_WATER_LEVEL:
+            tx_message.fields.water_level_percentage = measure_water_level();
+            tx_message.fields.sensor_value_raw = get_sensor_value();
+            State = TX;
+            printf("Water Level: %d\%", tx_message.fields.water_level_percentage);
             break;
         case LOWPOWER:
         default:
             // Set low power
-            TimerLowPowerHandler( );
+            TimerLowPowerHandler();
             break;
         }
 
         // Process Radio IRQ
-        Radio.IrqProcess( );
+        Radio.IrqProcess();
     }
 }
 
@@ -299,17 +183,6 @@ void OnTxDone( void )
     State = LOWPOWER;
 }
 
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
-{
-    printf("OnRxDone\r\n");
-    Radio.Sleep( );
-    BufferSize = size;
-    memcpy( Buffer, payload, BufferSize );
-    RssiValue = rssi;
-    SnrValue = snr;
-    State = RX;
-}
-
 void OnTxTimeout( void )
 {
     printf("OnTxTimeout\r\n");
@@ -317,23 +190,39 @@ void OnTxTimeout( void )
     State = TX_TIMEOUT;
 }
 
-void OnRxTimeout( void )
-{
-    printf("OnRxTimeout\r\n");
-    Radio.Sleep( );
-    State = RX_TIMEOUT;
-}
-
-void OnRxError( void )
-{
-    Radio.Sleep( );
-    State = RX_ERROR;
-}
-
 void SleepTimeoutIrq( void )
 {
     printf("SleepTimeoutIrq\r\n");
     TimerStop(&SleepTimeoutTimer);
-    State = TX;
-    pwr_exit_lprun_mode();
+    State = MEASURE_WATER_LEVEL;
+}
+
+uint16_t get_sensor_value(void)
+{
+    uint16_t sensor_val;
+    sensor_val  = gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
+    sensor_val |= gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
+    return sensor_val;
+}
+
+uint8_t measure_water_level(void)
+{
+    uint16_t sensor_val = get_sensor_value();
+    uint8_t water_level;
+
+    switch(sensor_val) {
+        case 0x0000:
+            water_level = 0;
+            break;
+        case 0x0001:
+            water_level = 50;
+            break;
+        case 0x0003:
+            water_level = 100;
+            break;
+        default: 
+            water_level = 100; //Send 100% in error conditions to prevent false motor running
+            break;
+    }
+    return water_level;
 }
