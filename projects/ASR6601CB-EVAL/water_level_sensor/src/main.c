@@ -1,11 +1,18 @@
 #include <stdio.h>
 #include <stdarg.h>
+#include "delay.h"
+#include "timer.h"
+#include "radio.h"
 #include "tremo_regs.h"
 #include "tremo_rtc.h"
 #include "tremo_rcc.h"
 #include "tremo_pwr.h"
 #include "tremo_uart.h"
 #include "tremo_gpio.h"
+#include "lora_config.h"
+#include "tremo_delay.h"
+#include "rtc-board.h"
+
 
 extern int app_start(void);
 
@@ -24,24 +31,36 @@ void uart_log_init(void)
     uart_cmd(CONFIG_DEBUG_UART, ENABLE);
 }
 
+void board_gpio_init(void)
+{
+    gpio_set_iomux(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN, 0);
+    gpio_set_iomux(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN, 0);
+    gpio_set_iomux(CONFIG_WATER_SENSOR_EN_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, 0);
+    gpio_init(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN, GPIO_MODE_INPUT_PULL_UP);
+    gpio_init(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN, GPIO_MODE_INPUT_PULL_UP);
+    gpio_init(CONFIG_WATER_SENSOR_EN_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_MODE_OUTPUT_PP_LOW);
+}
+
 void board_init()
 {
     rcc_enable_oscillator(RCC_OSC_XO32K, true);
 
-    rcc_enable_peripheral_clk(RCC_PERIPHERAL_UART0, true);
+    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_UART0, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOA, true);
-    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOB, true);
-    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOC, true);
-    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOD, true);
+    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOB, true);
+    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOC, true);
+    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOD, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_PWR, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_RTC, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_SAC, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_LORA, true);
 
+    board_gpio_init();
+
     delay_ms(100);
     pwr_xo32k_lpm_cmd(true);
 
-    uart_log_init();
+    // uart_log_init();
 
     RtcInit();
 }

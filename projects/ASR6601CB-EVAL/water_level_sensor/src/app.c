@@ -44,6 +44,7 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
+#define SLEEP_TIMEOUT_VALUE                         60 * 1000      //ms
 
 typedef enum
 {
@@ -53,6 +54,23 @@ typedef enum
     TX_TIMEOUT
 }States_t;
 
+typedef enum
+{
+    SENSOR_OK,
+    SENSOR_INVALID_VAL
+}sensor_err_t;
+
+typedef struct {
+    States_t State;
+    TimerEvent_t SleepTimeoutTimer;
+    uint32_t ChipId[2];
+    RadioEvents_t RadioEvents;
+    sensor_err_t sensor_error_status;
+    uint8_t water_level_percentage;
+    uint8_t sensor_value_raw;
+}app_sm_t;
+
+
 typedef union {
     struct message_fields{
         uint16_t device_id;
@@ -61,22 +79,14 @@ typedef union {
         uint8_t  water_level_percentage;
         uint8_t  sensor_value_raw;
         uint16_t battery_voltage_mv;
-        uint8_t  error_status;
+        sensor_err_t  error_status;
     }fields;
-    uint8_t buffer[11];
+    uint8_t buffer[12];
 }tx_message_t;
 
-#define BUFFER_SIZE                                 sizeof(tx_message_t) // Define the payload size here
-#define SLEEP_TIMEOUT_VALUE                         7000
 
-static volatile States_t State = TX;
-static uint32_t ChipId[2] = {0};
-static TimerEvent_t SleepTimeoutTimer;
 
-/*!
- * Radio events function pointer
- */
-static RadioEvents_t RadioEvents;
+static app_sm_t m_app_sm;
 
 /*!
  * \brief Function to be executed on Radio Tx Done event
@@ -93,17 +103,14 @@ void OnTxTimeout( void );
  */
 void SleepTimeoutIrq( void );
 
-uint16_t get_sensor_value(void);
-uint8_t measure_water_level(void);
+void contact_sensor_read(void);
+void measure_water_level(void);
 
 /**
  * Main application entry point.
  */
-int app_start( void )
+int app_start(void)
 {
-    bool isMaster = true;
-    uint8_t i;
-    uint32_t random;
     tx_message_t tx_message = {
         .fields.device_id              = 1,
         .fields.fw_ver                 = 0x0005, // v0.5
@@ -113,18 +120,22 @@ int app_start( void )
         .fields.sensor_value_raw       = 0
     };
 
-    printf("PingPong test Start!\r\n");
+    // printf("Water Level Sensor Start!\r\n");
 
-    (void)system_get_chip_id(ChipId);
+    memset(&m_app_sm, 0, sizeof(m_app_sm));
+
+    m_app_sm.State = MEASURE_WATER_LEVEL;
+
+    (void)system_get_chip_id(m_app_sm.ChipId);
 
     // Radio initialization
-    RadioEvents.TxDone    = OnTxDone;
-    RadioEvents.TxTimeout = OnTxTimeout;
-    RadioEvents.RxDone    = NULL;
-    RadioEvents.RxTimeout = NULL;
-    RadioEvents.RxError   = NULL;
+    m_app_sm.RadioEvents.TxDone    = OnTxDone;
+    m_app_sm.RadioEvents.TxTimeout = OnTxTimeout;
+    m_app_sm.RadioEvents.RxDone    = NULL;
+    m_app_sm.RadioEvents.RxTimeout = NULL;
+    m_app_sm.RadioEvents.RxError   = NULL;
 
-    Radio.Init( &RadioEvents );
+    Radio.Init( &m_app_sm.RadioEvents );
 
     Radio.SetChannel( RF_FREQUENCY );
 
@@ -138,29 +149,32 @@ int app_start( void )
                                    LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON,
                                    0, true, 0, 0, LORA_IQ_INVERSION_ON, true );
 
-    TimerInit( &SleepTimeoutTimer, SleepTimeoutIrq );
+    TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
     while( 1 )
     {
-        switch( State )
+        switch(m_app_sm.State)
         {
         case TX:
             // Send the next PING frame
+            // uint32_t random;
             // srand( *ChipId );
             // random = ( rand() + 1 ) % 90;
             // DelayMs( random );
             Radio.Send(tx_message.buffer, sizeof(tx_message_t));
-            printf("Sent: Tx Message\r\n");
-            State = LOWPOWER;
+            // printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
+            m_app_sm.State = LOWPOWER;
             break;
         case TX_TIMEOUT:
-            State = LOWPOWER;
+            m_app_sm.State = LOWPOWER;
             break;
         case MEASURE_WATER_LEVEL:
-            tx_message.fields.water_level_percentage = measure_water_level();
-            tx_message.fields.sensor_value_raw = get_sensor_value();
-            State = TX;
-            printf("Water Level: %d\%", tx_message.fields.water_level_percentage);
+            measure_water_level();
+            tx_message.fields.water_level_percentage = m_app_sm.water_level_percentage;
+            tx_message.fields.sensor_value_raw = m_app_sm.sensor_value_raw;
+            tx_message.fields.error_status = m_app_sm.sensor_error_status;
+            m_app_sm.State = TX;
+            // printf("Water Level: %d\r\n", tx_message.fields.water_level_percentage);
             break;
         case LOWPOWER:
         default:
@@ -176,53 +190,56 @@ int app_start( void )
 
 void OnTxDone( void )
 {
-    printf("OnTxDone\r\n");
+    // printf("OnTxDone\r\n");
     Radio.Sleep( );
-    TimerSetValue(&SleepTimeoutTimer, SLEEP_TIMEOUT_VALUE);
-    TimerStart(&SleepTimeoutTimer);
-    State = LOWPOWER;
+    TimerSetValue(&m_app_sm.SleepTimeoutTimer, SLEEP_TIMEOUT_VALUE);
+    TimerStart(&m_app_sm.SleepTimeoutTimer);
+    m_app_sm.State = LOWPOWER;
 }
 
 void OnTxTimeout( void )
 {
-    printf("OnTxTimeout\r\n");
+    // printf("OnTxTimeout\r\n");
     Radio.Sleep( );
-    State = TX_TIMEOUT;
+    m_app_sm.State = TX_TIMEOUT;
 }
 
 void SleepTimeoutIrq( void )
 {
-    printf("SleepTimeoutIrq\r\n");
-    TimerStop(&SleepTimeoutTimer);
-    State = MEASURE_WATER_LEVEL;
+    // printf("SleepTimeoutIrq\r\n");
+    TimerStop(&m_app_sm.SleepTimeoutTimer);
+    m_app_sm.State = MEASURE_WATER_LEVEL;
 }
 
-uint16_t get_sensor_value(void)
+void contact_sensor_read(void)
 {
-    uint16_t sensor_val;
-    sensor_val  = gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
-    sensor_val |= gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
-    return sensor_val;
+    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_HIGH);
+    DelayMs(100);
+    m_app_sm.sensor_value_raw  = gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
+    m_app_sm.sensor_value_raw |= gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
+    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_LOW);
 }
 
-uint8_t measure_water_level(void)
+void measure_water_level(void)
 {
-    uint16_t sensor_val = get_sensor_value();
-    uint8_t water_level;
+    contact_sensor_read();
 
-    switch(sensor_val) {
-        case 0x0000:
-            water_level = 0;
+    switch(m_app_sm.sensor_value_raw) {
+        case 0x0003:
+            m_app_sm.water_level_percentage = 0;
+            m_app_sm.sensor_error_status = SENSOR_OK;
             break;
         case 0x0001:
-            water_level = 50;
+            m_app_sm.water_level_percentage = 50;
+            m_app_sm.sensor_error_status = SENSOR_OK;
             break;
-        case 0x0003:
-            water_level = 100;
+        case 0x0000:
+            m_app_sm.water_level_percentage = 100;
+            m_app_sm.sensor_error_status = SENSOR_OK;
             break;
-        default: 
-            water_level = 100; //Send 100% in error conditions to prevent false motor running
+        default:
+            m_app_sm.water_level_percentage = 80; //Send 80% in error conditions to prevent false motor running
+            m_app_sm.sensor_error_status = SENSOR_INVALID_VAL;
             break;
     }
-    return water_level;
 }

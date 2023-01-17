@@ -1,7 +1,8 @@
 
 #include "tremo_it.h"
 
-
+extern void RadioOnDioIrq(void);
+extern void RtcOnIrq(void);
 
 
 /**
@@ -105,13 +106,13 @@ void PWR_IRQHandler()
 /*  file (startup_cm4.S).                                               */
 /******************************************************************************/
 
-/**
- * @brief  This function handles RTC Handler.
- * @param  None
- * @retval None
- */
+void LORA_IRQHandler()
+{
+    RadioOnDioIrq();
+}
+
 void RTC_IRQHandler(void)
 {
-    rtc_IRQHandler();
+    RtcOnIrq();
 }
 
