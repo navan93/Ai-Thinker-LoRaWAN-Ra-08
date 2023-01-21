@@ -416,5 +416,5 @@ void SleepTimeoutIrq( void )
     printf("SleepTimeoutIrq\r\n");
     TimerStop(&SleepTimeoutTimer);
     State = TX;
-    pwr_exit_lprun_mode();
+    // pwr_exit_lprun_mode();
 }
