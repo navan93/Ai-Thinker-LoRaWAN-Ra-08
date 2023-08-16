@@ -3,6 +3,8 @@
 #include "tremo_uart.h"
 #include "tremo_gpio.h"
 #include "tremo_rcc.h"
+#include "delay.h"
+
 
 void uart_log_init(void)
 {
@@ -28,7 +30,10 @@ int main(void)
     printf("hello world\r\n");
 
     /* Infinite loop */
-    while (1) { }
+    while (1) {
+    DelayMs( 500 );
+    printf("hello world\r\n");
+    }
 }
 
 #ifdef USE_FULL_ASSERT
