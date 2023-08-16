@@ -60,7 +60,7 @@ void board_init()
     delay_ms(100);
     pwr_xo32k_lpm_cmd(true);
 
-    // uart_log_init();
+    uart_log_init();
 
     RtcInit();
 }

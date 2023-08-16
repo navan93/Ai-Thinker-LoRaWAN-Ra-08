@@ -151,6 +151,8 @@ int app_start(void)
 
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
+    printf("Starting App\r\n");
+
     while( 1 )
     {
         switch(m_app_sm.State)
@@ -162,7 +164,7 @@ int app_start(void)
             // random = ( rand() + 1 ) % 90;
             // DelayMs( random );
             Radio.Send(tx_message.buffer, sizeof(tx_message_t));
-            // printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
+            printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
             m_app_sm.State = LOWPOWER;
             break;
         case TX_TIMEOUT:
