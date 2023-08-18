@@ -12,6 +12,9 @@
 #include "lora_config.h"
 #include "tremo_delay.h"
 #include "rtc-board.h"
+#include "tremo_adc.h"
+
+
 
 
 extern int app_start(void);
@@ -29,6 +32,7 @@ void uart_log_init(void)
     uart_config.baudrate = UART_BAUDRATE_115200;
     uart_init(CONFIG_DEBUG_UART, &uart_config);
     uart_cmd(CONFIG_DEBUG_UART, ENABLE);
+    printf("\r\n<----LoRa Water Sensor Logs---->\r\n");
 }
 
 void board_gpio_init(void)
@@ -36,24 +40,31 @@ void board_gpio_init(void)
     gpio_set_iomux(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN, 0);
     gpio_set_iomux(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN, 0);
     gpio_set_iomux(CONFIG_WATER_SENSOR_EN_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, 0);
+    gpio_set_iomux(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, 0);
+    gpio_set_iomux(GPIOA, CONFIG_WATER_SENSOR_HX710B_OUT_PIN, 0);
     gpio_init(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN, GPIO_MODE_INPUT_PULL_UP);
     gpio_init(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN, GPIO_MODE_INPUT_PULL_UP);
     gpio_init(CONFIG_WATER_SENSOR_EN_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_MODE_OUTPUT_PP_LOW);
+    gpio_init(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, GPIO_MODE_OUTPUT_PP_LOW);
+    gpio_init(GPIOA, CONFIG_WATER_SENSOR_HX710B_OUT_PIN, GPIO_MODE_INPUT_FLOATING);
 }
 
 void board_init()
 {
+    rcc_set_adc_clk_source(RCC_ADC_CLK_SOURCE_RCO48M);
     rcc_enable_oscillator(RCC_OSC_XO32K, true);
 
-    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_UART0, true);
+    rcc_enable_peripheral_clk(RCC_PERIPHERAL_UART0, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOA, true);
-    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOB, true);
-    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOC, true);
-    // rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOD, true);
+    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOB, true);
+    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOC, true);
+    rcc_enable_peripheral_clk(RCC_PERIPHERAL_GPIOD, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_PWR, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_RTC, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_SAC, true);
     rcc_enable_peripheral_clk(RCC_PERIPHERAL_LORA, true);
+    rcc_enable_peripheral_clk(RCC_PERIPHERAL_ADC, true);
+
 
     board_gpio_init();
 

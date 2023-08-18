@@ -28,6 +28,9 @@
 #include "tremo_pwr.h"
 #include "tremo_gpio.h"
 #include "lora_config.h"
+#include "hx710b.h"
+#include "tremo_adc.h"
+
 
 #define RF_FREQUENCY                                865000000 // Hz
 #define TX_OUTPUT_POWER                             14        // dBm
@@ -44,7 +47,7 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
-#define SLEEP_TIMEOUT_VALUE                         60 * 1000      //ms
+#define SLEEP_TIMEOUT_VALUE                         2 * 1000      //ms
 
 typedef enum
 {
@@ -54,37 +57,21 @@ typedef enum
     TX_TIMEOUT
 }States_t;
 
-typedef enum
-{
-    SENSOR_OK,
-    SENSOR_INVALID_VAL
-}sensor_err_t;
-
 typedef struct {
     States_t State;
     TimerEvent_t SleepTimeoutTimer;
-    uint32_t ChipId[2];
     RadioEvents_t RadioEvents;
-    sensor_err_t sensor_error_status;
-    uint8_t water_level_percentage;
-    uint8_t sensor_value_raw;
 }app_sm_t;
 
-
-typedef union {
-    struct message_fields{
-        uint16_t device_id;
-        uint16_t fw_ver;
-        uint16_t hw_ver;
-        uint8_t  water_level_percentage;
-        uint8_t  sensor_value_raw;
-        uint16_t battery_voltage_mv;
-        sensor_err_t  error_status;
-    }fields;
-    uint8_t buffer[12];
+typedef struct message_fields{
+    uint32_t ChipId[2];
+    uint16_t fw_ver;
+    uint16_t hw_ver;
+    float battery_voltage;   //32bits
+    uint32_t hx710b_val_raw;
+    uint8_t  sensor_value_raw;
+    uint8_t  sensor_value_mask;
 }tx_message_t;
-
-
 
 static app_sm_t m_app_sm;
 
@@ -103,30 +90,74 @@ void OnTxTimeout( void );
  */
 void SleepTimeoutIrq( void );
 
-void contact_sensor_read(void);
-void measure_water_level(void);
+uint8_t contact_sensor_read(void);
+void update_sensor_vals(tx_message_t*);
+
+float read_vbat(void)
+{
+    gpio_t *gpiox;
+    uint32_t pin;
+    float gain_value;
+    float dco_value;
+    uint16_t adc_data_1;
+    float calibrated_sample_1;
+
+    adc_get_calibration_value(false, &gain_value, &dco_value);
+
+    //ADC_IN1
+    gpiox = GPIOA;
+    pin = GPIO_PIN_8;
+    gpio_init(gpiox, pin, GPIO_MODE_ANALOG);
+
+    adc_init();
+
+    adc_config_clock_division(20); //sample frequence 150K
+
+    adc_config_sample_sequence(0, 2);
+
+    adc_config_conv_mode(ADC_CONV_MODE_DISCONTINUE);
+
+    adc_enable(true);
+
+	adc_start(true);
+    while(!adc_get_interrupt_status(ADC_ISR_EOC));
+    (void)adc_get_data();
+
+    adc_start(true);
+    while(!adc_get_interrupt_status(ADC_ISR_EOC));
+    adc_data_1 = adc_get_data();
+
+    adc_start(false);
+    adc_enable(false);
+    //calibration sample value
+    calibrated_sample_1 = ((1.2/4096) * adc_data_1 - dco_value) / gain_value;
+    printf("vbat_adc: %d, vbat_calibrated: %fV\r\n",adc_data_1, calibrated_sample_1);
+
+    return calibrated_sample_1;
+}
 
 /**
  * Main application entry point.
  */
 int app_start(void)
 {
-    tx_message_t tx_message = {
-        .fields.device_id              = 1,
-        .fields.fw_ver                 = 0x0005, // v0.5
-        .fields.hw_ver                 = 0x0100, // v1.0
-        .fields.battery_voltage_mv     = 3600,
-        .fields.water_level_percentage = 0,
-        .fields.sensor_value_raw       = 0
-    };
+    uint32_t random;
 
-    // printf("Water Level Sensor Start!\r\n");
+    tx_message_t tx_message = {
+        .fw_ver                 = 0x0100, // v1.0
+        .hw_ver                 = 0x0101, // v1.1
+        .battery_voltage        = 0.0,
+        .sensor_value_mask      = 3,     //1 bit represnting 1 contact, lsb being the lowest point contact
+        .sensor_value_raw       = 0,
+        .hx710b_val_raw         = 0
+    };
+    (void)system_get_chip_id(tx_message.ChipId);
+
+    printf("Water Level Sensor Start!\r\n");
 
     memset(&m_app_sm, 0, sizeof(m_app_sm));
 
     m_app_sm.State = MEASURE_WATER_LEVEL;
-
-    (void)system_get_chip_id(m_app_sm.ChipId);
 
     // Radio initialization
     m_app_sm.RadioEvents.TxDone    = OnTxDone;
@@ -152,6 +183,7 @@ int app_start(void)
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
     printf("Starting App\r\n");
+    hx710b_set_pd(1);
 
     while( 1 )
     {
@@ -159,24 +191,30 @@ int app_start(void)
         {
         case TX:
             // Send the next PING frame
-            // uint32_t random;
-            // srand( *ChipId );
-            // random = ( rand() + 1 ) % 90;
-            // DelayMs( random );
-            Radio.Send(tx_message.buffer, sizeof(tx_message_t));
+
+            srand(tx_message.ChipId[0]);
+            random = ( rand() + 1 ) % 90;
+            DelayMs( random );
+            Radio.Send((uint8_t*)&tx_message, sizeof(tx_message_t));
             printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
+            printf("ChipId_L: %lx, ChipId_H: %lx, fw_ver: %x, hw_ver: %x, vbat: %f, hx710b_raw: %lu, sensor_value_raw: %d, sensor_value_mask: %x\r\n",
+                tx_message.ChipId[0],
+                tx_message.ChipId[1],
+                tx_message.fw_ver,
+                tx_message.hw_ver,
+                tx_message.battery_voltage,
+                tx_message.hx710b_val_raw,
+                tx_message.sensor_value_raw,
+                tx_message.sensor_value_mask
+            );
             m_app_sm.State = LOWPOWER;
             break;
         case TX_TIMEOUT:
             m_app_sm.State = LOWPOWER;
             break;
         case MEASURE_WATER_LEVEL:
-            measure_water_level();
-            tx_message.fields.water_level_percentage = m_app_sm.water_level_percentage;
-            tx_message.fields.sensor_value_raw = m_app_sm.sensor_value_raw;
-            tx_message.fields.error_status = m_app_sm.sensor_error_status;
+            update_sensor_vals(&tx_message);
             m_app_sm.State = TX;
-            // printf("Water Level: %d\r\n", tx_message.fields.water_level_percentage);
             break;
         case LOWPOWER:
         default:
@@ -213,35 +251,24 @@ void SleepTimeoutIrq( void )
     m_app_sm.State = MEASURE_WATER_LEVEL;
 }
 
-void contact_sensor_read(void)
+uint8_t contact_sensor_read(void)
 {
+    uint8_t sensor_value_raw = 0;
     gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_HIGH);
     DelayMs(100);
-    m_app_sm.sensor_value_raw  = gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
-    m_app_sm.sensor_value_raw |= gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
+    //Invert because input is fed from an open drain transistor
+    sensor_value_raw  = !gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
+    sensor_value_raw |= !gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
     gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_LOW);
+    return sensor_value_raw;
 }
 
-void measure_water_level(void)
+void update_sensor_vals(tx_message_t *p_tx_message)
 {
-    contact_sensor_read();
-
-    switch(m_app_sm.sensor_value_raw) {
-        case 0x0003:
-            m_app_sm.water_level_percentage = 0;
-            m_app_sm.sensor_error_status = SENSOR_OK;
-            break;
-        case 0x0001:
-            m_app_sm.water_level_percentage = 50;
-            m_app_sm.sensor_error_status = SENSOR_OK;
-            break;
-        case 0x0000:
-            m_app_sm.water_level_percentage = 100;
-            m_app_sm.sensor_error_status = SENSOR_OK;
-            break;
-        default:
-            m_app_sm.water_level_percentage = 80; //Send 80% in error conditions to prevent false motor running
-            m_app_sm.sensor_error_status = SENSOR_INVALID_VAL;
-            break;
-    }
+    // printf("HX710B: %lu \r\n", hx710b_read_pressure_raw());
+    // printf("HX710B: %f cm\r\n", hx710b_read_water_cm());
+    // printf("HX710B: %f pa\r\n", hx710b_read_pascal());
+    p_tx_message->hx710b_val_raw   = hx710b_read_pressure_raw();
+    p_tx_message->sensor_value_raw = contact_sensor_read();
+    p_tx_message->battery_voltage  = read_vbat();
 }
