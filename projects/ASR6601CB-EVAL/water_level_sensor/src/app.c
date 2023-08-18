@@ -30,6 +30,7 @@
 #include "lora_config.h"
 #include "hx710b.h"
 #include "tremo_adc.h"
+#include "tremo_delay.h"
 
 
 #define RF_FREQUENCY                                865000000 // Hz
@@ -47,7 +48,8 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
-#define SLEEP_TIMEOUT_VALUE                         2 * 1000      //ms
+#define SLEEP_TIMEOUT_VALUE                         10 * 1000      //ms
+#define VBAT_FACTOR                                 3.06f
 
 typedef enum
 {
@@ -97,23 +99,29 @@ float read_vbat(void)
 {
     gpio_t *gpiox;
     uint32_t pin;
-    float gain_value;
-    float dco_value;
+    float gain_value = 1.188f;
+    float dco_value = -0.107f;
     uint16_t adc_data_1;
     float calibrated_sample_1;
 
-    adc_get_calibration_value(false, &gain_value, &dco_value);
+    // adc_get_calibration_value(false, &gain_value, &dco_value);
+    // gain_value = 1.0f;
+
 
     //ADC_IN1
     gpiox = GPIOA;
     pin = GPIO_PIN_8;
     gpio_init(gpiox, pin, GPIO_MODE_ANALOG);
 
+    adc_enable_vbat31(true);
+
     adc_init();
+    delay_us(1000);
 
     adc_config_clock_division(20); //sample frequence 150K
 
-    adc_config_sample_sequence(0, 2);
+
+    adc_config_sample_sequence(0, 15);
 
     adc_config_conv_mode(ADC_CONV_MODE_DISCONTINUE);
 
@@ -131,7 +139,8 @@ float read_vbat(void)
     adc_enable(false);
     //calibration sample value
     calibrated_sample_1 = ((1.2/4096) * adc_data_1 - dco_value) / gain_value;
-    printf("vbat_adc: %d, vbat_calibrated: %fV\r\n",adc_data_1, calibrated_sample_1);
+    calibrated_sample_1 *= VBAT_FACTOR;
+    printf("vbat_adc: %d, vbat_calibrated: %fV\r\n, gain: %f, offset: %f",adc_data_1, calibrated_sample_1, gain_value, dco_value);
 
     return calibrated_sample_1;
 }
