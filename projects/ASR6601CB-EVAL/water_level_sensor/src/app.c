@@ -48,7 +48,7 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
-#define SLEEP_TIMEOUT_VALUE                         10 * 1000      //ms
+#define SLEEP_TIMEOUT_VALUE                         60 * 1000      //ms
 #define VBAT_FACTOR                                 3.06f
 
 typedef enum
@@ -140,7 +140,7 @@ float read_vbat(void)
     //calibration sample value
     calibrated_sample_1 = ((1.2/4096) * adc_data_1 - dco_value) / gain_value;
     calibrated_sample_1 *= VBAT_FACTOR;
-    printf("vbat_adc: %d, vbat_calibrated: %fV\r\n, gain: %f, offset: %f",adc_data_1, calibrated_sample_1, gain_value, dco_value);
+    printf("vbat_adc: %d, vbat_calibrated: %fV, gain: %f, offset: %f\r\n",adc_data_1, calibrated_sample_1, gain_value, dco_value);
 
     return calibrated_sample_1;
 }
@@ -280,4 +280,6 @@ void update_sensor_vals(tx_message_t *p_tx_message)
     p_tx_message->hx710b_val_raw   = hx710b_read_pressure_raw();
     p_tx_message->sensor_value_raw = contact_sensor_read();
     p_tx_message->battery_voltage  = read_vbat();
+    uint32_t hx710b_temp = hx710b_read_temperature();
+    printf("HX710B Temp: %lu\r\n", hx710b_temp);
 }

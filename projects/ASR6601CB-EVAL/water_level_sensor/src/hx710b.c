@@ -72,6 +72,43 @@ static uint32_t readHX(uint8_t HX_MODE) {
   return result;
 }
 
+uint32_t hx710b_read_temperature(void)
+{
+  uint8_t data[3];
+
+  hx710b_set_pd(0);
+
+  //After power up first reading would be pressure 10Hz, just read it out
+  // read the 24-bit pressure as 3 bytes using SPI
+  for (uint8_t j = 3; j--;) {
+    hx710b_shiftInByte();
+  }
+
+  //Set temp measurement mode
+  for (char i = 0; i < TEMP_40Hz; i++) {
+    gpio_write(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, GPIO_LEVEL_HIGH);
+    delay_us(1);
+    gpio_write(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, GPIO_LEVEL_LOW);
+  }
+  hx710b_set_pd(0);
+
+  //Shift in 24bits temperature data
+  for (uint8_t j = 3; j--;) {
+    data[j] = hx710b_shiftInByte();
+  }
+
+  //power down
+  hx710b_set_pd(1);
+
+  // shift the 3 bytes into a large integer
+  uint32_t result = 0;
+  result += (long)data[2] << 16;
+  result += (long)data[1] << 8;
+  result += (long)data[0];
+
+  return result;
+}
+
 static float HX710B2pascal(uint32_t val){
     float value = ((val*RES) *200) + 500;
     return value;
