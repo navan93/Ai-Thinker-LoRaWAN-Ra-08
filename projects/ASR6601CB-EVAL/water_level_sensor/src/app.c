@@ -70,7 +70,8 @@ typedef struct message_fields{
     uint16_t fw_ver;
     uint16_t hw_ver;
     float battery_voltage;   //32bits
-    uint32_t hx710b_val_raw;
+    uint32_t hx710b_pressure_val_raw;
+    uint32_t hx710b_temp_val_raw;
     uint8_t  sensor_value_raw;
     uint8_t  sensor_value_mask;
 }tx_message_t;
@@ -94,6 +95,16 @@ void SleepTimeoutIrq( void );
 
 uint8_t contact_sensor_read(void);
 void update_sensor_vals(tx_message_t*);
+
+static void hx710b_gpio_init()
+{
+  gpio_init(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, GPIO_MODE_OUTPUT_PP_LOW);
+}
+
+static void hx710b_gpio_deinit()
+{
+  gpio_init(GPIOA, CONFIG_WATER_SENSOR_HX710B_SCK_PIN, GPIO_MODE_INPUT_PULL_DOWN);
+}
 
 float read_vbat(void)
 {
@@ -140,7 +151,7 @@ float read_vbat(void)
     //calibration sample value
     calibrated_sample_1 = ((1.2/4096) * adc_data_1 - dco_value) / gain_value;
     calibrated_sample_1 *= VBAT_FACTOR;
-    printf("vbat_adc: %d, vbat_calibrated: %fV, gain: %f, offset: %f\r\n",adc_data_1, calibrated_sample_1, gain_value, dco_value);
+    // printf("vbat_adc: %d, vbat_calibrated: %fV, gain: %f, offset: %f\r\n",adc_data_1, calibrated_sample_1, gain_value, dco_value);
 
     return calibrated_sample_1;
 }
@@ -153,12 +164,13 @@ int app_start(void)
     uint32_t random;
 
     tx_message_t tx_message = {
-        .fw_ver                 = 0x0100, // v1.0
-        .hw_ver                 = 0x0101, // v1.1
-        .battery_voltage        = 0.0,
-        .sensor_value_mask      = 3,     //1 bit represnting 1 contact, lsb being the lowest point contact
-        .sensor_value_raw       = 0,
-        .hx710b_val_raw         = 0
+        .fw_ver                  = 0x0100, // v1.0
+        .hw_ver                  = 0x0101, // v1.1
+        .battery_voltage         = 0.0,
+        .sensor_value_mask       = 3,     //1 bit represnting 1 contact, lsb being the lowest point contact
+        .sensor_value_raw        = 0,
+        .hx710b_pressure_val_raw = 0,
+        .hx710b_temp_val_raw     = 0,
     };
     (void)system_get_chip_id(tx_message.ChipId);
 
@@ -192,7 +204,9 @@ int app_start(void)
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
     printf("Starting App\r\n");
-    hx710b_set_pd(1);
+    // hx710b_gpio_init();
+    // hx710b_set_pd(1);
+    // hx710b_gpio_deinit();
 
     while( 1 )
     {
@@ -206,13 +220,14 @@ int app_start(void)
             DelayMs( random );
             Radio.Send((uint8_t*)&tx_message, sizeof(tx_message_t));
             printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
-            printf("ChipId_L: %lx, ChipId_H: %lx, fw_ver: %x, hw_ver: %x, vbat: %f, hx710b_raw: %lu, sensor_value_raw: %d, sensor_value_mask: %x\r\n",
+            printf("ChipId_L: %lx, ChipId_H: %lx, fw_ver: %x, hw_ver: %x, vbat: %f, hx710b_pressure_raw: %lu, hx710b_temp_raw: %lu, sensor_value_raw: %d, sensor_value_mask: %x\r\n",
                 tx_message.ChipId[0],
                 tx_message.ChipId[1],
                 tx_message.fw_ver,
                 tx_message.hw_ver,
                 tx_message.battery_voltage,
-                tx_message.hx710b_val_raw,
+                tx_message.hx710b_pressure_val_raw,
+                tx_message.hx710b_temp_val_raw,
                 tx_message.sensor_value_raw,
                 tx_message.sensor_value_mask
             );
@@ -263,12 +278,11 @@ void SleepTimeoutIrq( void )
 uint8_t contact_sensor_read(void)
 {
     uint8_t sensor_value_raw = 0;
-    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_HIGH);
-    DelayMs(100);
+
+    // DelayMs(100);
     //Invert because input is fed from an open drain transistor
     sensor_value_raw  = !gpio_read(CONFIG_WATER_SENSOR_1_GPIOX, CONFIG_WATER_SENSOR_1_PIN);
     sensor_value_raw |= !gpio_read(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_2_PIN) << 1;
-    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_LOW);
     return sensor_value_raw;
 }
 
@@ -277,9 +291,13 @@ void update_sensor_vals(tx_message_t *p_tx_message)
     // printf("HX710B: %lu \r\n", hx710b_read_pressure_raw());
     // printf("HX710B: %f cm\r\n", hx710b_read_water_cm());
     // printf("HX710B: %f pa\r\n", hx710b_read_pascal());
-    p_tx_message->hx710b_val_raw   = hx710b_read_pressure_raw();
+    hx710b_gpio_init();
+    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_HIGH);
+    DelayMs(100);
+    p_tx_message->hx710b_pressure_val_raw   = hx710b_read_pressure_raw();
     p_tx_message->sensor_value_raw = contact_sensor_read();
     p_tx_message->battery_voltage  = read_vbat();
-    uint32_t hx710b_temp = hx710b_read_temperature();
-    printf("HX710B Temp: %lu\r\n", hx710b_temp);
+    p_tx_message->hx710b_temp_val_raw = hx710b_read_temperature();
+    hx710b_gpio_deinit();
+    gpio_write(CONFIG_WATER_SENSOR_2_GPIOX, CONFIG_WATER_SENSOR_EN_PIN, GPIO_LEVEL_LOW);
 }

@@ -35,6 +35,8 @@ static uint8_t hx710b_shiftInByte() {
   }
 }
 
+
+
 static uint32_t readHX(uint8_t HX_MODE) {
 
   // pulse clock line to start a reading
