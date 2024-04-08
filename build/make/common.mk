@@ -69,7 +69,7 @@ $(foreach src,$(CXX_SOURCES),$(eval $(call BUILD_CXX_PROCESS,$(PROJECT),$(src)))
 
 # flash settings
 TREMO_LOADER := $(SCRIPTS_PATH)/tremo_loader.py
-SERIAL_PORT        ?= /dev/cu.usbserial-A9JHDPZS
+SERIAL_PORT        ?= $(shell readlink -f /dev/serial/by-id/*FTDI*A9JHDPZS*if00*)
 SERIAL_BAUDRATE    ?= 921600
 $(PROJECT)_ADDRESS ?= 0x08000000
 
