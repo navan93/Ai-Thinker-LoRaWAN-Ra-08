@@ -31,6 +31,8 @@
 #include "tremo_adc.h"
 #include "tremo_delay.h"
 #include "tremo_i2c.h"
+#include "vl53l0x.h"
+#include "hal_i2c.h"
 
 
 #define RF_FREQUENCY                                865000000 // Hz
@@ -140,36 +142,36 @@ float read_vbat(void)
     return calibrated_sample_1;
 }
 
-static uint8_t i2c_read(uint8_t reg_addr)
-{
-    uint8_t reg_data;
+// static uint8_t i2c_read(uint8_t reg_addr)
+// {
+//     uint8_t reg_data;
 
-    // start
-    i2c_master_send_start(I2C0, 0x29, I2C_WRITE);
-    i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
-    while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
+//     // start
+//     i2c_master_send_start(I2C0, 0x29, I2C_WRITE);
+//     i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
+//     while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
 
-    // send data
-    i2c_send_data(I2C0, reg_addr);
-    i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
-    while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
+//     // send data
+//     i2c_send_data(I2C0, reg_addr);
+//     i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
+//     while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
 
-    // send start for read
-    i2c_master_send_start(I2C0, 0x29, I2C_READ);
-    i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
-    while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
+//     // send start for read
+//     i2c_master_send_start(I2C0, 0x29, I2C_READ);
+//     i2c_clear_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY);
+//     while (i2c_get_flag_status(I2C0, I2C_FLAG_TRANS_EMPTY) != SET);
 
-    // read data
-    i2c_set_receive_mode(I2C0, I2C_NAK);
-    while (i2c_get_flag_status(I2C0, I2C_FLAG_RECV_FULL) != SET);
-    i2c_clear_flag_status(I2C0, I2C_FLAG_RECV_FULL);
-    reg_data = i2c_receive_data(I2C0);
+//     // read data
+//     i2c_set_receive_mode(I2C0, I2C_NAK);
+//     while (i2c_get_flag_status(I2C0, I2C_FLAG_RECV_FULL) != SET);
+//     i2c_clear_flag_status(I2C0, I2C_FLAG_RECV_FULL);
+//     reg_data = i2c_receive_data(I2C0);
 
-    // stop
-    i2c_master_send_stop(I2C0);
+//     // stop
+//     i2c_master_send_stop(I2C0);
 
-    return reg_data;
-}
+//     return reg_data;
+// }
 
 /**
  * Main application entry point.
@@ -177,7 +179,8 @@ static uint8_t i2c_read(uint8_t reg_addr)
 int app_start(void)
 {
     uint32_t random;
-    uint8_t vl53l0x_reg_data;
+    // uint8_t vl53l0x_reg_data;
+    uint16_t range;
 
     tx_message_t tx_message = {
         .fw_ver                  = 0x0100, // v1.0
@@ -215,6 +218,16 @@ int app_start(void)
 
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
+    // vl53l0x_reg_data = i2c_read(0xC0);
+    // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
+
+    // hal_i2c_read_addr8_data8(0xC0, &vl53l0x_reg_data);
+    // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
+
+    bool rc = vl53l0x_init();
+    if(rc) printf("VL53L0X Initialised\n");
+
+
     printf("Starting App\r\n");
 
     while( 1 )
@@ -244,8 +257,11 @@ int app_start(void)
             m_app_sm.State = TX;
             tx_message.battery_voltage = read_vbat();
             printf("Measure VL53L0X distance\n");
-            vl53l0x_reg_data = i2c_read(0xC1);
-            printf("Reg %X = %X\n",0xC1, vl53l0x_reg_data);
+            vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &range);
+            printf("Distance: %d mm\n", range);
+            // vl53l0x_reg_data = i2c_read(0xC0);
+            // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
+
             break;
         case LOWPOWER:
         default:
