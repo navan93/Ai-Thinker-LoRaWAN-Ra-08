@@ -72,6 +72,7 @@ typedef struct message_fields{
     uint16_t fw_ver;
     uint16_t hw_ver;
     float battery_voltage;   //32bits
+    uint16_t distance_mm;
 }tx_message_t;
 
 static app_sm_t m_app_sm;
@@ -180,12 +181,11 @@ int app_start(void)
 {
     uint32_t random;
     // uint8_t vl53l0x_reg_data;
-    uint16_t range;
 
     tx_message_t tx_message = {
-        .fw_ver                  = 0x0100, // v1.0
-        .hw_ver                  = 0x0101, // v1.1
-        .battery_voltage         = 0.0,
+        .fw_ver                  = 0x0101, // v1.1
+        .hw_ver                  = 0x0102, // v1.2
+        .battery_voltage         = 0.0f,
     };
     (void)system_get_chip_id(tx_message.ChipId);
 
@@ -240,13 +240,14 @@ int app_start(void)
             random = ( rand() + 1 ) % 90;
             DelayMs( random );
             Radio.Send((uint8_t*)&tx_message, sizeof(tx_message_t));
-            printf("Sent: Tx Message %dB\r\n", sizeof(tx_message_t));
-            printf("ChipId_L: %lx, ChipId_H: %lx, fw_ver: %x, hw_ver: %x, vbat: %f\r\n",
+            printf("Sent Tx Message %d Bytes\r\n", sizeof(tx_message_t));
+            printf("ChipId_L: 0x%lx, ChipId_H: 0x%lx, fw_ver: 0x%x, hw_ver: 0x%x, vbat: %f V, distance: %d mm\r\n",
                 tx_message.ChipId[0],
                 tx_message.ChipId[1],
                 tx_message.fw_ver,
                 tx_message.hw_ver,
-                tx_message.battery_voltage
+                tx_message.battery_voltage,
+                tx_message.distance_mm
             );
             m_app_sm.State = LOWPOWER;
             break;
@@ -256,12 +257,8 @@ int app_start(void)
         case MEASURE_DISTANCE:
             m_app_sm.State = TX;
             tx_message.battery_voltage = read_vbat();
-            printf("Measure VL53L0X distance\n");
-            vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &range);
-            printf("Distance: %d mm\n", range);
-            // vl53l0x_reg_data = i2c_read(0xC0);
-            // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
-
+            vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &tx_message.distance_mm);
+            printf("Measure VL53L0X distance: %d mm\n", tx_message.distance_mm);
             break;
         case LOWPOWER:
         default:
