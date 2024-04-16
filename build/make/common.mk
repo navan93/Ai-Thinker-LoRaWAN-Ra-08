@@ -69,7 +69,13 @@ $(foreach src,$(CXX_SOURCES),$(eval $(call BUILD_CXX_PROCESS,$(PROJECT),$(src)))
 
 # flash settings
 TREMO_LOADER := $(SCRIPTS_PATH)/tremo_loader.py
-SERIAL_PORT        ?= $(shell readlink -f /dev/serial/by-id/*FTDI*A9JHDPZS*if00*)
+ifeq ($(shell uname -s),Linux)
+	SERIAL_PORT ?= $(shell readlink -f /dev/serial/by-id/*FTDI*A9JHDPZS*if00*)
+else ifeq ($(shell uname -s),Darwin)
+	SERIAL_PORT ?= /dev/cu.usbserial-A9JHDPZS
+else
+	$(VIEW)echo No serial port found
+endif
 SERIAL_BAUDRATE    ?= 921600
 $(PROJECT)_ADDRESS ?= 0x08000000
 
