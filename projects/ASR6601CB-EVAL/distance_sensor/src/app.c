@@ -41,8 +41,8 @@
                                                               //  1: 250 kHz,
                                                               //  2: 500 kHz,
                                                               //  3: Reserved]
-#define LORA_SPREADING_FACTOR                       10         // [SF7..SF12]
-#define LORA_CODINGRATE                             1         // [1: 4/5,
+#define LORA_SPREADING_FACTOR                       12         // [SF7..SF12]
+#define LORA_CODINGRATE                             4         // [1: 4/5,
                                                               //  2: 4/6,
                                                               //  3: 4/7,
                                                               //  4: 4/8]
@@ -50,8 +50,8 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
-#define SLEEP_TIMEOUT_VALUE                         5 * 1000      //ms
-#define VBAT_FACTOR                                 3.06f
+#define SLEEP_TIMEOUT_VALUE                         60 * 1000      //ms
+#define VBAT_FACTOR                                 3
 
 typedef enum
 {
@@ -97,8 +97,8 @@ float read_vbat(void)
 {
     gpio_t *gpiox;
     uint32_t pin;
-    float gain_value = 1.188f;
-    float dco_value = -0.107f;
+    float gain_value = 0.95f;
+    float dco_value = 0.1f;
     uint16_t adc_data_1;
     float calibrated_sample_1;
 
@@ -136,9 +136,10 @@ float read_vbat(void)
     adc_start(false);
     adc_enable(false);
     //calibration sample value
-    calibrated_sample_1 = ((1.2/4096) * adc_data_1 - dco_value) / gain_value;
-    calibrated_sample_1 *= VBAT_FACTOR;
-    // printf("vbat_adc: %d, vbat_calibrated: %fV, gain: %f, offset: %f\r\n",adc_data_1, calibrated_sample_1, gain_value, dco_value);
+    calibrated_sample_1 = ((((1.2f*VBAT_FACTOR)/4096) * adc_data_1) - dco_value) * gain_value;
+    // calibrated_sample_1 *= VBAT_FACTOR;
+    // calibrated_sample_1 = (adc_data_1 - dco_value) / gain_value;
+    printf("vbat_adc: %d, vbat_calibrated: %fV, gain: %f, offset: %f\r\n",adc_data_1, calibrated_sample_1, gain_value, dco_value);
 
     return calibrated_sample_1;
 }
@@ -181,6 +182,7 @@ int app_start(void)
 {
     uint32_t random;
     // uint8_t vl53l0x_reg_data;
+    bool vl53l0x_init_done = false;
 
     tx_message_t tx_message = {
         .fw_ver                  = 0x0101, // v1.1
@@ -209,7 +211,7 @@ int app_start(void)
     Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH,
                                    LORA_SPREADING_FACTOR, LORA_CODINGRATE,
                                    LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
-                                   true, 0, 0, LORA_IQ_INVERSION_ON, 1000 );
+                                   true, 0, 0, LORA_IQ_INVERSION_ON, 10000 );
 
     Radio.SetRxConfig( MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
                                    LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
@@ -218,14 +220,11 @@ int app_start(void)
 
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
-    // vl53l0x_reg_data = i2c_read(0xC0);
-    // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
-
-    // hal_i2c_read_addr8_data8(0xC0, &vl53l0x_reg_data);
-    // printf("Reg %X = %X\n",0xC0, vl53l0x_reg_data);
-
     bool rc = vl53l0x_init();
-    if(rc) printf("VL53L0X Initialised\n");
+    if(rc) {
+        vl53l0x_init_done = true;
+        printf("VL53L0X Initialised\n");
+    }
 
 
     printf("Starting App\r\n");
@@ -257,8 +256,13 @@ int app_start(void)
         case MEASURE_DISTANCE:
             m_app_sm.State = TX;
             tx_message.battery_voltage = read_vbat();
-            vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &tx_message.distance_mm);
-            printf("Measure VL53L0X distance: %d mm\n", tx_message.distance_mm);
+            if(vl53l0x_init_done) {
+                vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &tx_message.distance_mm);
+                printf("Measure VL53L0X distance: %d mm\n", tx_message.distance_mm);
+            } else {
+                printf("VL53L0X Unavailable");
+                tx_message.distance_mm = 0;
+            }
             break;
         case LOWPOWER:
         default:
