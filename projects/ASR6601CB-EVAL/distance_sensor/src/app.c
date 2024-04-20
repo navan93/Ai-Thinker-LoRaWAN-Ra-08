@@ -36,12 +36,12 @@
 
 
 #define RF_FREQUENCY                                865000000 // Hz
-#define TX_OUTPUT_POWER                             0        // dBm
+#define TX_OUTPUT_POWER                             1         // dBm
 #define LORA_BANDWIDTH                              0         // [0: 125 kHz,
                                                               //  1: 250 kHz,
                                                               //  2: 500 kHz,
                                                               //  3: Reserved]
-#define LORA_SPREADING_FACTOR                       12         // [SF7..SF12]
+#define LORA_SPREADING_FACTOR                       10         // [SF7..SF12]
 #define LORA_CODINGRATE                             4         // [1: 4/5,
                                                               //  2: 4/6,
                                                               //  3: 4/7,
