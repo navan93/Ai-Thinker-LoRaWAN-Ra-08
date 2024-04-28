@@ -17,6 +17,9 @@
  * \endcode
  *
  * \author    Navaneeth Bhardwaj G
+ *
+ * \TODO:
+ *  1. Add timeouts to I2C comms
  */
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +36,8 @@
 #include "tremo_i2c.h"
 #include "vl53l0x.h"
 #include "hal_i2c.h"
+#include "sx126x-board.h"
+
 
 
 #define RF_FREQUENCY                                865000000 // Hz
@@ -41,7 +46,7 @@
                                                               //  1: 250 kHz,
                                                               //  2: 500 kHz,
                                                               //  3: Reserved]
-#define LORA_SPREADING_FACTOR                       10         // [SF7..SF12]
+#define LORA_SPREADING_FACTOR                       12         // [SF7..SF12]
 #define LORA_CODINGRATE                             4         // [1: 4/5,
                                                               //  2: 4/6,
                                                               //  3: 4/7,
@@ -50,8 +55,14 @@
 #define LORA_SYMBOL_TIMEOUT                         0         // Symbols
 #define LORA_FIX_LENGTH_PAYLOAD_ON                  false
 #define LORA_IQ_INVERSION_ON                        false
-#define SLEEP_TIMEOUT_VALUE                         60 * 1000      //ms
+#define SLEEP_TIMEOUT_VALUE                         (10 * 1000)   //ms
 #define VBAT_FACTOR                                 3
+#define VBAT_UVLO_LEVEL                             2.85f        // V
+#define VBAT_UVLO_LEVEL_EXIT                        3.0f        // V
+#define DISTANCE_MIN_DELTA                          50          // mm
+#define KEEP_ALIVE_TIMEOUT_MS                       (30 * 60 * 1000) // ms
+// #define KEEP_ALIVE_TIMEOUT_COUNT                    (KEEP_ALIVE_TIMEOUT_MS/SLEEP_TIMEOUT_VALUE)
+#define KEEP_ALIVE_TIMEOUT_COUNT                    0
 
 typedef enum
 {
@@ -65,6 +76,9 @@ typedef struct {
     States_t State;
     TimerEvent_t SleepTimeoutTimer;
     RadioEvents_t RadioEvents;
+    uint16_t prev_distance;
+    uint16_t time_since_last_tx;
+    float battery_voltage;
 }app_sm_t;
 
 typedef struct message_fields{
@@ -181,15 +195,21 @@ float read_vbat(void)
 int app_start(void)
 {
     uint32_t random;
+    uint8_t tx_msg[100];
     // uint8_t vl53l0x_reg_data;
     bool vl53l0x_init_done = false;
+    uint16_t distance_curr=0;
+
+    int8_t tx_powers[] = {-21, -18, -15, -12, -9, -6, -3, -1, 0, 3, 6, 9, 12, 15, 18, 21, 22};
+    uint8_t tx_power_indx = 0;
 
     tx_message_t tx_message = {
-        .fw_ver                  = 0x0101, // v1.1
+        .fw_ver                  = 0x0102, // v1.2
         .hw_ver                  = 0x0102, // v1.2
         .battery_voltage         = 0.0f,
     };
     (void)system_get_chip_id(tx_message.ChipId);
+    tx_message.ChipId[0] = 0x1234;
 
     printf("Distance Sensor Start!\r\n");
 
@@ -203,6 +223,10 @@ int app_start(void)
     m_app_sm.RadioEvents.RxDone    = NULL;
     m_app_sm.RadioEvents.RxTimeout = NULL;
     m_app_sm.RadioEvents.RxError   = NULL;
+
+    // Internal variables
+    m_app_sm.prev_distance = VL53L0X_OUT_OF_RANGE;
+    m_app_sm.time_since_last_tx = KEEP_ALIVE_TIMEOUT_COUNT;
 
     Radio.Init( &m_app_sm.RadioEvents );
 
@@ -220,48 +244,65 @@ int app_start(void)
 
     TimerInit( &m_app_sm.SleepTimeoutTimer, SleepTimeoutIrq );
 
-    bool rc = vl53l0x_init();
-    if(rc) {
-        vl53l0x_init_done = true;
-        printf("VL53L0X Initialised\n");
-    }
+    // bool rc = vl53l0x_init();
+    // if(rc) {
+    //     vl53l0x_init_done = true;
+    //     printf("VL53L0X Initialised\n");
+    // }
 
 
     printf("Starting App\r\n");
+    printf("Tx Message size: %d Bytes\r\n", sizeof(tx_msg));
+    printf("Radio time on air: %ld ms\r\n", Radio.TimeOnAir(MODEM_LORA, sizeof(tx_msg)));
 
     while( 1 )
     {
         switch(m_app_sm.State)
         {
         case TX:
-            // Send the next PING frame
-            srand(tx_message.ChipId[0]);
-            random = ( rand() + 1 ) % 90;
-            DelayMs( random );
-            Radio.Send((uint8_t*)&tx_message, sizeof(tx_message_t));
-            printf("Sent Tx Message %d Bytes\r\n", sizeof(tx_message_t));
-            printf("ChipId_L: 0x%lx, ChipId_H: 0x%lx, fw_ver: 0x%x, hw_ver: 0x%x, vbat: %f V, distance: %d mm\r\n",
-                tx_message.ChipId[0],
-                tx_message.ChipId[1],
-                tx_message.fw_ver,
-                tx_message.hw_ver,
-                tx_message.battery_voltage,
-                tx_message.distance_mm
-            );
+            if(m_app_sm.time_since_last_tx >= KEEP_ALIVE_TIMEOUT_COUNT || abs(m_app_sm.prev_distance-distance_curr)>50) {
+                // Send the next PING frame
+                srand(tx_message.ChipId[0]);
+                random = ( rand() + 1 ) % 90;
+                DelayMs( random );
+                m_app_sm.prev_distance = distance_curr;
+                tx_message.distance_mm = m_app_sm.prev_distance;
+                SX126xSetRfTxPower(tx_powers[tx_power_indx]);
+                printf("Send Tx at %i dBm\r\n", tx_powers[tx_power_indx]);
+                Radio.Send(tx_msg, sizeof(tx_msg));
+                printf("ChipId_L: 0x%lx, ChipId_H: 0x%lx, fw_ver: 0x%x, hw_ver: 0x%x, vbat: %f V, distance: %d mm\r\n",
+                    tx_message.ChipId[0],
+                    tx_message.ChipId[1],
+                    tx_message.fw_ver,
+                    tx_message.hw_ver,
+                    tx_message.battery_voltage,
+                    tx_message.distance_mm
+                );
+                m_app_sm.time_since_last_tx = 0;
+                if(++tx_power_indx >= sizeof(tx_powers)) tx_power_indx = 0;
+            } else {
+                m_app_sm.time_since_last_tx++;
+            }
             m_app_sm.State = LOWPOWER;
             break;
         case TX_TIMEOUT:
+            printf("Tx timed out!\r\n");
             m_app_sm.State = LOWPOWER;
             break;
         case MEASURE_DISTANCE:
-            m_app_sm.State = TX;
-            tx_message.battery_voltage = read_vbat();
-            if(vl53l0x_init_done) {
-                vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &tx_message.distance_mm);
-                printf("Measure VL53L0X distance: %d mm\n", tx_message.distance_mm);
-            } else {
-                printf("VL53L0X Unavailable");
-                tx_message.distance_mm = 0;
+            m_app_sm.battery_voltage = read_vbat();
+            m_app_sm.State = LOWPOWER;
+            if(m_app_sm.battery_voltage <= VBAT_UVLO_LEVEL) {
+                break;
+            } else if(m_app_sm.battery_voltage >= VBAT_UVLO_LEVEL_EXIT) {
+                m_app_sm.State = TX;
+                if(vl53l0x_init_done) {
+                    vl53l0x_read_range_single(VL53L0X_IDX_FIRST, &distance_curr);
+                    printf("Measure VL53L0X distance: %d mm\n", distance_curr);
+                } else {
+                    printf("VL53L0X Unavailable\r\n");
+                    tx_message.distance_mm = 0;
+                }
             }
             break;
         case LOWPOWER:
@@ -287,7 +328,6 @@ void OnTxDone( void )
 
 void OnTxTimeout( void )
 {
-    // printf("OnTxTimeout\r\n");
     Radio.Sleep( );
     m_app_sm.State = TX_TIMEOUT;
 }
